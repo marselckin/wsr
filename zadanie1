@@ -1,4 +1,6 @@
+https://ctf.82.202.138.50.sslip.io/arena/w1/register
 Открыть devtools - F12
 Получение роли происходит за счет добавления нового поля role: shiftlead
 <input name="role" value="shiftlead">
 В форме не стоит запрет на использование дополнительных полей
+Флаг RTK{mass_assignment_shiftlead}
