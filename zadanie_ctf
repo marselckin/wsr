@@ -174,3 +174,330 @@ SNMPv2c — протокол управления сетью, используе
 UlRLe3NubXBfY29tbXVuaXR5X2xlYWt9 - это кодировка BASE64, декодировать любым удобныс способом
 
 Флаг: RTK{snmp_community_leak}
+
+ЗАДАНИЕ NET-03
+В PCAP — SIP Digest REGISTER и диагностический RTP-кодек 96. Подберите пароль по короткому wordlist, затем восстановите RTP payload в порядке sequence и снимите XOR с SHA-256(password).
+
+//Описание
+Подберите SIP Digest пароль по wordlist. Payload динамического RTP-типа 96 — байты,
+XOR с повторяющимся SHA-256(password); порядок задаёт RTP sequence.
+
+Анализ пакета
+Authorization: Digest username="voicemail", realm="rtk.lab", nonce="b7846a0c", 
+uri="sip:pbx.rtk.lab", response="6147644df42b2005ec7e6f60bb1f4d31", algorithm=MD5
+
+m=audio 40000 RTP/AVP 96
+a=rtpmap:96 X-RTK/8000
+
+Пароли
+spring 
+operator 
+telemetry 
+backup2026 
+bluebird - правильный пароль. чтобы подобрать пароль надо вычислить хэш , который отправляет пользователь, склеить со случайным числом b7846a0c и хэшем сервера, после этого вычислить хэш еще раз
+HA1 = MD5(username:realm:password)
+HA2 = MD5(method:uri)
+response = MD5(HA1:nonce:HA2)
+Это сложно вручную, поэтому я взял код питона, который написал Дипсик и запустил. Нужно установить пакеты numpy и scapy
+//Код для поиска пароля
+
+import hashlib
+
+username = "voicemail"
+realm = "rtk.lab"
+nonce = "b7846a0c"
+uri = "sip:pbx.rtk.lab"
+method = "REGISTER"
+expected_response = "6147644df42b2005ec7e6f60bb1f4d31"
+
+# Короткий wordlist (можно расширить)
+wordlist = [
+    "spring", "operator", "bluebird", "telemetry", 
+    "backup2026"
+]
+
+def digest_md5_response(pwd):
+    ha1 = hashlib.md5(f"{username}:{realm}:{pwd}".encode()).hexdigest()
+    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+    return hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+
+found = None
+for pwd in wordlist:
+    if digest_md5_response(pwd) == expected_response:
+        found = pwd
+        print(f"[+] Пароль найден: {pwd}")
+        break
+
+if not found:
+    print("[-] Пароль не найден в wordlist")
+    # Попробуем расширенный список
+    with open("rockyou.txt", "r", errors="ignore") as f:
+        for line in f:
+            pwd = line.strip()
+            if digest_md5_response(pwd) == expected_response:
+                found = pwd
+                print(f"[+] Пароль найден: {pwd}")
+                break
+
+//КОд для поиска флага
+#!/usr/bin/env python3
+import hashlib
+from scapy.all import *
+
+# ====== НАСТРОЙКИ ======
+PCAP_FILE = "capture.pcap"    # путь к вашему pcap
+SRC_PORT = 40000
+DST_PORT = 40002
+PASSWORD = "bluebird"
+
+# ====== 1. СБОР RTP PAYLOAD ПО ПОРЯДКУ SEQUENCE ======
+print("[*] Чтение pcap...")
+packets = rdpcap(PCAP_FILE)
+
+payloads = {}  # key: sequence, value: payload (байты)
+
+for pkt in packets:
+    # Фильтр по UDP-портам
+    if UDP in pkt and pkt[UDP].sport == SRC_PORT and pkt[UDP].dport == DST_PORT:
+        udp_data = bytes(pkt[UDP].payload)
+        if len(udp_data) > 12:  # минимальный RTP-заголовок
+            # Извлекаем sequence из RTP-заголовка (байты 2-3)
+            seq = int.from_bytes(udp_data[2:4], byteorder='big')
+            # Извлекаем payload (после 12 байт заголовка)
+            payload = udp_data[12:]
+            if seq not in payloads:  # удаляем дубликаты
+                payloads[seq] = payload
+
+if not payloads:
+    print("[-] RTP-пакеты не найдены. Проверьте порты и pcap.")
+    exit(1)
+
+# Сортировка по sequence и объединение
+full_data = b''.join(payloads[seq] for seq in sorted(payloads.keys()))
+print(f"[+] Собрано пакетов: {len(payloads)}")
+print(f"[+] Общий размер данных: {len(full_data)} байт")
+
+# ====== 2. ГЕНЕРАЦИЯ КЛЮЧА ======
+key = hashlib.sha256(PASSWORD.encode()).digest()
+print(f"[+] Ключ (SHA-256): {key.hex()[:16]}... (длина {len(key)} байт)")
+
+# ====== 3. XOR РАСШИФРОВКА ======
+decrypted = bytearray()
+for i in range(len(full_data)):
+    decrypted.append(full_data[i] ^ key[i % len(key)])
+decrypted = bytes(decrypted)
+
+# ====== 4. СОХРАНЕНИЕ И ВЫВОД ======
+# Сохраняем как бинарный файл
+with open("decrypted_output.bin", "wb") as f:
+    f.write(decrypted)
+print("[+] Сохранено в decrypted_output.bin")
+
+# Пытаемся показать как текст
+try:
+    text = decrypted.decode('utf-8')
+    print("\n[+] Текстовое содержимое:")
+    print(text)
+except UnicodeDecodeError:
+    print("\n[-] Данные не являются текстом в UTF-8.")
+    print(f"Первые 32 байта (HEX): {decrypted[:32].hex()}")
+
+    # Пробуем определить тип файла
+    import subprocess
+    try:
+        result = subprocess.run(['file', '-b', 'decrypted_output.bin'], capture_output=True, text=True)
+        print(f"Определение типа: {result.stdout.strip()}")
+    except:
+        pass
+
+Флаг RTK{sip_digest_voicemail}
+
+ЗАДАНИЕ NET-04
+В MQTT-дампе перемешаны live и retained публикации. Только retained topics образуют сообщение; числовой суффикс задаёт порядок, payload записан hex.
+//Описание
+Выберите MQTT PUBLISH с RETAIN=1, отсортируйте темы по числовому суффиксу и декодируйте hex payload.
+
+live (не retained) — обычные сообщения, которые исчезают после доставки.
+retained — сообщения, которые сохраняются на брокере и отдаются новым подписчикам.
+
+В вашем дампе:
+Перемешаны live и retained публикации.
+Только retained topics содержат полезные данные.
+Числовой суффикс в теме (например, topic/1, topic/2) задаёт порядок склеивания.
+Payload записан в HEX-формате.
+
+//Решение
+В WireShark установить фильтр mqtt.retain == 1
+скопировать hex 
+EHu@@@
+<
+<8[P1plant/retained/052544b7b6d71
+EHH@@@
+<
+<8[P1plant/retained/174745f726574
+EHC=@@
+<
+<8[8P1plant/retained/261696e65645f
+EHQ@@)
+<
+<8[P1plant/retained/3667261676d65
+ED@@=u
+<
+<8[P1plant/retained/46e74737d
+
+Hex без первой цифры после P1plant/retained/(это суффиск)
+52544b7b6d7174745f72657461696e65645f667261676d656e74737d
+
+Перевести любыи декодером
+
+Код в питоне
+
+#!/usr/bin/env python3
+import re
+from scapy.all import *
+
+PCAP_FILE = "capture1.pcap"
+
+
+def parse_mqtt_publish(tcp_data):
+    """Ручной парсинг MQTT PUBLISH."""
+    if not tcp_data or len(tcp_data) < 5:
+        return None
+
+    first_byte = tcp_data[0]
+    msgtype = (first_byte >> 4) & 0x0F
+    retain = first_byte & 0x01
+
+    if msgtype != 3 or retain != 1:
+        return None
+
+    # Длина оставшихся данных
+    remaining_len = tcp_data[1]
+    if len(tcp_data) < 2 + remaining_len:
+        return None
+
+    # Тема
+    topic_len = int.from_bytes(tcp_data[2:4], byteorder='big')
+    topic_start = 4
+    topic_end = topic_start + topic_len
+
+    if len(tcp_data) < topic_end:
+        return None
+
+    topic = tcp_data[topic_start:topic_end].decode('utf-8', errors='ignore')
+    payload = tcp_data[topic_end:]
+
+    return topic, payload
+
+
+print("[*] Чтение PCAP...")
+packets = rdpcap(PCAP_FILE)
+messages = {}
+
+for pkt in packets:
+    if TCP in pkt and (pkt[TCP].sport == 1883 or pkt[TCP].dport == 1883):
+        result = parse_mqtt_publish(bytes(pkt[TCP].payload))
+        if result:
+            topic, payload = result
+            match = re.search(r'/(\d+)$', topic)
+            if match:
+                num = int(match.group(1))
+                if num not in messages:
+                    messages[num] = payload
+
+if not messages:
+    print("[-] Ничего не найдено.")
+    exit(1)
+
+full_data = b''.join(messages[num] for num in sorted(messages.keys()))
+
+with open("mqtt_payload.bin", "wb") as f:
+    f.write(full_data)
+
+print(f"[+] Собрано {len(full_data)} байт")
+print(f"[+] Первые 32 байта: {full_data[:32].hex()}")
+
+try:
+    print(full_data.decode('utf-8'))
+except UnicodeDecodeError:
+    print("(бинарные данные)")
+
+Флаг: RTK{mqtt_retained_fragments}
+
+ЗАДАНИЕ NET-05
+
+Сопоставьте запись NAT с внешним TCP tuple, выделите правильную последовательность port-knocking и расшифруйте поток после открытия порта 4444. Формат ключа дан в README.
+Найдите внешний tuple узла 10.70.5.23, восстановите корректный порядок knock-портов.
+После magic RTK-KNOCK\0 данные XOR'ятся повторяющимися big-endian байтами этих портов.
+
+//Описание
+
+Найти NAT-запись для узла 10.70.5.23 – определить внешний IP и порт (TCP tuple).
+Выделить последовательность port-knocking – найти пакеты, идущие на этот внешний tuple в правильном порядке.
+Восстановить корректный порядок knock-портов – отсортировать по времени или по sequence.
+Найти поток, открывающий порт 4444 – после успешного knocking.
+Расшифровать поток:
+Найти magic RTK-KNOCK\0 в данных.
+Данные после magic XOR'ятся повторяющимися big-endian байтами портов (из последовательности knocking).
+Расшифровать и получить флаг.
+
+//Решение
+Открыть файл nat.csv
+В записи 10.70.5.23,51772,82.202.138.50,53144,203.0.113.77
+видим, что nat через 203.0.113.77
+В Wireshark сортируем ip.src == 203.0.113.77 и по дате. 
+Читаем hex строки с портом 4444. Нас интересует hex с начала RTK-KNOCK - это
+52544b7b706f72745f6b6e6f636b5f6e61745f636f7272656c6174696f6e7d
+
+https://gchq.github.io/CyberChef/
+
+С помощью ключа расшифровываем HEX
+RTK{port_knock_nat_correction}
+
+Код в питоне
+#!/usr/bin/env python3
+import re, struct
+from scapy.all import *
+
+PCAP = "capture2.pcap"
+REMOTE = "203.0.113.77"
+MAGIC = b"RTK-KNOCK\0"
+
+# ====== 1. ПОРТЫ ИЗ SYN-ПАКЕТОВ ======
+p = rdpcap(PCAP)
+knock = []
+for pkt in p:
+    if IP in pkt and TCP in pkt and pkt[IP].src == REMOTE and pkt[TCP].flags & 0x02:
+        knock.append((pkt.time, pkt[TCP].dport))
+knock.sort(key=lambda x: x[0])
+ports = [x[1] for x in knock]
+print(f"[+] Ports: {ports}")
+
+# ====== 2. ДАННЫЕ С 4444 ======
+chunks = []
+for pkt in p:
+    if IP in pkt and TCP in pkt and pkt[IP].src == REMOTE and pkt[TCP].dport == 4444:
+        if pkt[TCP].payload:
+            chunks.append((pkt[TCP].seq, bytes(pkt[TCP].payload)))
+chunks.sort(key=lambda x: x[0])
+data = b''.join(c[1] for c in chunks)
+print(f"[+] Data: {len(data)} bytes")
+
+# ====== 3. MAGIC ======
+pos = data.find(MAGIC)
+if pos == -1:
+    print("[-] Magic not found")
+    exit(1)
+
+encrypted = data[pos + len(MAGIC):]
+print(f"[+] Encrypted: {len(encrypted)} bytes")
+
+# ====== 4. XOR ======
+key = b''.join(struct.pack('>H', p) for p in ports)
+key = (key * (len(encrypted) // len(key) + 1))[:len(encrypted)]
+decrypted = bytes(encrypted[i] ^ key[i] for i in range(len(encrypted)))
+
+# ====== 5. ВЫВОД ======
+print("\n" + "="*50)
+print(decrypted.decode('utf-8', errors='ignore'))
+print("="*50)
