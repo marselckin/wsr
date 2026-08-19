@@ -501,3 +501,537 @@ decrypted = bytes(encrypted[i] ^ key[i] for i in range(len(encrypted)))
 print("\n" + "="*50)
 print(decrypted.decode('utf-8', errors='ignore'))
 print("="*50)
+
+ЗАДАНИЕ FUN-01 — Пиксели невиновны
+PNG отображается нормально. Автор утверждает, что пиксели ничего не скрывают. Проверьте именованные chunks/metadata и декодируйте записку оператора
+//Описание
+Изображение не повреждено и не содержит LSB-стеганографии.
+//Решение
+Большой код в питоне. Надо установить дополнительные библиотеки. Сохранить с расширением py и запустить через комнадную строку вместе с рисунком
+C:\Users\popovsa\PycharmProjects\pythonProject2>test.py status-board.png
+✅ PNG файл: status-board.png
+======================================================================
+
+📦 Чанк #1: IHDR (длина: 13 байт)
+   🖼️ Размер: 640x360
+   🖼️ Глубина: 8 бит
+   🖼️ Тип цвета: 2
+
+📦 Чанк #2: tEXt (длина: 50 байт)
+   📝 Ключ: Operator-Note
+   📝 Текст: UlRLe3BuZ19jaHVua19ub3RfcGl4ZWxzfQ==
+
+📦 Чанк #3: tEXt (длина: 55 байт)
+   📝 Ключ: Hint
+   📝 Текст: The pixels are innocent; inspect named PNG chunks.
+
+📦 Чанк #4: IDAT (длина: 2292 байт)
+   📊 Данные изображения (часть 4)
+
+📦 Чанк #5: IEND (длина: 0 байт)
+   🏁 Конец изображения
+
+======================================================================
+
+📌 НАЙДЕННЫЕ СООБЩЕНИЯ:
+
+1. [tEXt]
+   UlRLe3BuZ19jaHVua19ub3RfcGl4ZWxzfQ==
+
+2. [tEXt]
+   The pixels are innocent; inspect named PNG chunks.
+Видим - UlRLe3BuZ19jaHVua19ub3RfcGl4ZWxzfQ==
+ЭТо код в Base64. Декодируем
+
+import base64
+
+encoded = "UlRLe3BuZ19jaHVua19ub3RfcGl4ZWxzfQ=="
+decoded = base64.b64decode(encoded).decode('utf-8')
+print(decoded)
+
+//Флаг
+RTK{png_chunk_not_pixels}
+
+//КОД
+import struct
+import zlib
+import binascii
+import os
+import sys
+
+
+def analyze_png_chunks(png_file):
+    """
+    Полный анализ всех чанков PNG файла
+    """
+    if not os.path.exists(png_file):
+        print(f"❌ Файл {png_file} не найден!")
+        return [], []
+
+    with open(png_file, 'rb') as f:
+        # Проверяем сигнатуру PNG
+        signature = f.read(8)
+        if signature != b'\x89PNG\r\n\x1a\n':
+            print("❌ Не PNG файл!")
+            return [], []
+
+        print(f"✅ PNG файл: {png_file}")
+        print("=" * 70)
+
+        chunk_count = 0
+        messages = []
+        chunks_info = []
+
+        while True:
+            # Читаем длину чанка
+            length_data = f.read(4)
+            if len(length_data) < 4:
+                break
+            length = struct.unpack('>I', length_data)[0]
+
+            # Читаем тип чанка
+            chunk_type = f.read(4).decode('ascii')
+            chunk_count += 1
+
+            # Читаем данные чанка
+            data = f.read(length)
+
+            # Читаем CRC
+            crc = f.read(4)
+
+            print(f"\n📦 Чанк #{chunk_count}: {chunk_type} (длина: {length} байт)")
+
+            # Обработка разных типов чанков
+            if chunk_type == 'tEXt':
+                # Текстовый чанк
+                try:
+                    null_pos = data.find(b'\x00')
+                    if null_pos != -1:
+                        keyword = data[:null_pos].decode('utf-8', errors='ignore')
+                        text = data[null_pos + 1:].decode('utf-8', errors='ignore')
+                        print(f"   📝 Ключ: {keyword}")
+                        print(f"   📝 Текст: {text}")
+                        messages.append(('tEXt', text))
+                except Exception as e:
+                    print(f"   ⚠️ Ошибка: {e}")
+
+            elif chunk_type == 'zTXt':
+                # Сжатый текстовый чанк
+                try:
+                    null_pos = data.find(b'\x00')
+                    if null_pos != -1:
+                        keyword = data[:null_pos].decode('utf-8', errors='ignore')
+                        compression_method = data[null_pos + 1] if null_pos + 1 < len(data) else 0
+                        compressed_data = data[null_pos + 2:]
+                        if compression_method == 0:
+                            text = zlib.decompress(compressed_data).decode('utf-8', errors='ignore')
+                            print(f"   📝 Ключ: {keyword}")
+                            print(f"   📝 Текст: {text}")
+                            messages.append(('zTXt', text))
+                        else:
+                            print(f"   📝 Ключ: {keyword} (метод сжатия: {compression_method})")
+                except Exception as e:
+                    print(f"   ⚠️ Ошибка распаковки zTXt: {e}")
+
+            elif chunk_type == 'iTXt':
+                # Интернациональный текстовый чанк
+                try:
+                    parts = data.split(b'\x00')
+                    if len(parts) >= 4:
+                        keyword = parts[0].decode('utf-8', errors='ignore')
+                        language = parts[1].decode('utf-8', errors='ignore') if len(parts) > 1 else ''
+                        translated = parts[2].decode('utf-8', errors='ignore') if len(parts) > 2 else ''
+                        text = parts[3].decode('utf-8', errors='ignore') if len(parts) > 3 else ''
+                        print(f"   📝 Ключ: {keyword}")
+                        print(f"   📝 Текст: {text}")
+                        messages.append(('iTXt', text))
+                except Exception as e:
+                    print(f"   ⚠️ Ошибка iTXt: {e}")
+
+            elif chunk_type == 'IHDR':
+                # Заголовок изображения
+                if length >= 13:
+                    width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
+                        '>IIBBBBB', data[:13])
+                    print(f"   🖼️ Размер: {width}x{height}")
+                    print(f"   🖼️ Глубина: {bit_depth} бит")
+                    print(f"   🖼️ Тип цвета: {color_type}")
+                    chunks_info.append(('IHDR', width, height))
+
+            elif chunk_type == 'IDAT':
+                print(f"   📊 Данные изображения (часть {chunk_count})")
+
+            elif chunk_type == 'IEND':
+                print("   🏁 Конец изображения")
+                break
+
+            elif chunk_type in ['PLTE', 'bKGD', 'cHRM', 'gAMA', 'hIST', 'pHYs', 'sBIT', 'sPLT', 'sRGB']:
+                print(f"   🔧 Стандартный чанк: {chunk_type}")
+
+            elif chunk_type in ['acTL', 'fcTL', 'fdAT']:
+                print(f"   🎞️ APNG чанк: {chunk_type}")
+
+            else:
+                # Неизвестный чанк
+                print(f"   ⚠️ НЕИЗВЕСТНЫЙ ЧАНК!")
+                # Пытаемся прочитать как текст
+                try:
+                    text = data.decode('utf-8', errors='ignore')
+                    # Проверяем, есть ли осмысленный текст
+                    if len(text) > 0 and any(c.isalnum() or c.isspace() for c in text):
+                        print(f"   📝 Текст: {text}")
+                        messages.append((chunk_type, text))
+                    else:
+                        print(f"   📎 Данные (hex): {data[:32].hex()}...")
+                except:
+                    print(f"   📎 Данные (hex): {data[:32].hex()}...")
+
+        print("\n" + "=" * 70)
+        print("\n📌 НАЙДЕННЫЕ СООБЩЕНИЯ:")
+        if messages:
+            for i, (chunk_type, msg) in enumerate(messages, 1):
+                print(f"\n{i}. [{chunk_type}]")
+                print(f"   {msg.strip()}")
+        else:
+            print("   ❌ Сообщения не найдены")
+            print("\n💡 Возможные причины:")
+            print("   - Сообщение закодировано в пикселях (LSB-стеганография)")
+            print("   - Сообщение зашифровано")
+            print("   - Используйте pngcheck для детального анализа")
+
+        return messages, chunks_info
+
+
+# Запуск
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Использование: python analyze.py <файл.png>")
+        print("Пример: python analyze.py status-board.png")
+        sys.exit(1)
+
+    messages, info = analyze_png_chunks(sys.argv[1])
+
+ЗАДАНИЕ FUN-02 — После полуночи
+В WAV слышен телеграфный сигнал. Параметры точки указаны в README. Расшифруйте фразу и оформите её в заданном формате флага.
+700 Гц, одна временная единица — 70 мс. Формат флага: RTK{слова_в_нижнем_регистре}.
+//Описание
+Определить длительность сигнала (700 Гц - это частота тона)
+Определить, что считать точкой и тире
+Распарсить последовательность
+Алгоритм декодирования
+Типичный телеграфный код:
+Точка (·) = 1 временная единица
+Тире (–) = 3 временные единицы
+Пауза между элементами = 1 временная единица
+Пауза между буквами = 3 временные единицы
+Пауза между словами = 7 временных единиц
+
+// Решение
+Можно загнать в онлайн сервис https://dimorse.com/ru/morse-code-audio-decoder/
+И расшифровать wav - в файле азбука морзе
+Ответ RTK MORSE AFTER MIDNIGHT - это RTK{morse_after_midnight}
+
+Или на питон/ Код немного корявый. выдает NTK MORSE AFTER MIDNIGH. Дипсик говорит, что плохо слышно
+//КОД
+import wave
+import numpy as np
+import struct
+from scipy.signal import hilbert
+
+
+def decode_wav_proper(filename):
+    with wave.open(filename, 'rb') as wav:
+        sample_rate = wav.getframerate()
+        n_frames = wav.getnframes()
+        frames = wav.readframes(n_frames)
+        samples = struct.unpack(f"{n_frames}h", frames)
+        samples = np.array(samples)
+        samples = samples / np.max(np.abs(samples))
+
+        # Огибающая
+        analytic = hilbert(samples)
+        envelope = np.abs(analytic)
+
+        # Находим порог
+        threshold = np.mean(envelope) + 0.2 * np.std(envelope)
+        signal = envelope > threshold
+
+        # Находим все переходы (начала и концы импульсов)
+        transitions = []
+        for i in range(1, len(signal)):
+            if signal[i] != signal[i - 1]:
+                transitions.append(i)
+
+        print(f"Найдено переходов: {len(transitions)}")
+
+        # Извлекаем длительности импульсов и пауз
+        pulses = []
+        gaps = []
+
+        i = 0
+        while i < len(transitions) - 1:
+            # Проверяем, является ли это началом импульса (signal = True)
+            if signal[transitions[i]] == True:
+                # Длительность импульса
+                pulse_duration = (transitions[i + 1] - transitions[i]) * 1000 / sample_rate
+                pulses.append(pulse_duration)
+
+                # Если есть следующая пара
+                if i + 2 < len(transitions):
+                    # Длительность паузы
+                    gap_duration = (transitions[i + 2] - transitions[i + 1]) * 1000 / sample_rate
+                    gaps.append(gap_duration)
+
+                i += 2
+            else:
+                i += 1
+
+        print(f"Найдено импульсов: {len(pulses)}")
+        print(f"Найдено пауз: {len(gaps)}")
+
+        # Определяем единицу времени (70 мс)
+        unit = 70
+
+        print("\nДлительности импульсов (первые 100):")
+        for i, p in enumerate(pulses[:100]):
+            print(f"  {i + 1}: {p:.1f} мс", end=" ")
+            if p < unit * 1.5:
+                print("(.)")
+            elif p < unit * 3.5:
+                print("(-)")
+            else:
+                print("(длинный)")
+
+        print("\nДлительности пауз (первые 100):")
+        for i, g in enumerate(gaps[:100]):
+            print(f"  {i + 1}: {g:.1f} мс", end=" ")
+            if g < unit * 1.5:
+                print("(между элементами)")
+            elif g < unit * 3.5:
+                print("(между буквами)")
+            else:
+                print("(между словами)")
+
+        # Преобразуем в символы Морзе с учетом пауз
+        morse_letters = []
+        current_letter = []
+
+        for i, pulse in enumerate(pulses):
+            # Определяем символ
+            if pulse < unit * 1.5:
+                current_letter.append('.')
+            elif pulse < unit * 3.5:
+                current_letter.append('-')
+            else:
+                current_letter.append(' ')  # Разделитель
+
+            # Проверяем паузу после этого импульса
+            if i < len(gaps):
+                gap = gaps[i]
+                if gap > unit * 2.5 and gap < unit * 4.5:
+                    # Конец буквы
+                    if current_letter:
+                        morse_letters.append(''.join(current_letter))
+                        current_letter = []
+                elif gap > unit * 5:
+                    # Конец слова
+                    if current_letter:
+                        morse_letters.append(''.join(current_letter))
+                        current_letter = []
+                    morse_letters.append('/')
+
+        # Последняя буква
+        if current_letter:
+            morse_letters.append(''.join(current_letter))
+
+        print(f"\nМорзе (разбито по буквам):")
+        print(' '.join(morse_letters))
+
+        # Декодируем
+        morse_code = {
+            '.-': 'A', '-...': 'B', '-.-.': 'C', '-..': 'D', '.': 'E',
+            '..-.': 'F', '--.': 'G', '....': 'H', '..': 'I', '.---': 'J',
+            '-.-': 'K', '.-..': 'L', '--': 'M', '-.': 'N', '---': 'O',
+            '.--.': 'P', '--.-': 'Q', '.-.': 'R', '...': 'S', '-': 'T',
+            '..-': 'U', '...-': 'V', '.--': 'W', '-..-': 'X', '-.--': 'Y',
+            '--..': 'Z',
+            '..--..': '?', '-.-.--': '!', '.-.-.-': '.', '--..--': ','
+        }
+
+        decoded = []
+        for letter in morse_letters:
+            if letter in morse_code:
+                decoded.append(morse_code[letter])
+            elif letter == '/':
+                decoded.append(' ')
+            else:
+                decoded.append('?')
+
+        result = ''.join(decoded)
+        print(f"\n📡 Расшифрованное сообщение:")
+        print(f"  {result}")
+
+        # Формируем флаг - ИСПРАВЛЕНО!
+        if result:
+            # Убираем лишние пробелы и приводим к нижнему регистру
+            words = result.strip().lower().split()
+            flag = f"RTK{{'_'.join(words)}}"
+            print(f"\n✅ ФЛАГ: {flag}")
+
+        return result
+
+
+# Запуск
+if __name__ == "__main__":
+    import sys
+
+    filename = sys.argv[1] if len(sys.argv) > 1 else 'signal.wav'
+    decode_wav_proper(filename)
+
+ЗАДАНИЕ FUN-03 — Отчёт справа налево
+Текстовый отчёт визуально противоречит байтовому содержимому. Найдите управляющие Unicode bidi-коды и восстановите логический порядок фрагментов.
+Смотрите порядок кодовых точек, а не только визуальный рендер редактора. Удалите bidi controls и обратите управляемые фрагменты.
+
+//Решение
+Я просто совместил строки, особых изменений нет
+# Визуально строки выглядят иначе из-за U+202E RIGHT-TO-LEFT OVERRIDE.
+record_0=safe:‮inu{KTR‬:end
+record_1=safe:‮ib_edoc‬:end
+record_2=safe:‮ever_id‬:end
+record_3=safe:‮}dela‬:end
+
+RTK{unicode_bidi_reveale}
+
+//Код - выводить правильную последовательность
+def decode_file_simple(filename):
+    """
+    Простая версия - читает файл и удаляет BiDi
+    """
+    with open(filename, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Удаляем все управляющие символы
+    import re
+    clean = re.sub(r'[\u202A-\u202E\u2066-\u2069]', '', text)
+
+    # Если есть RLO, разворачиваем фрагменты
+    if '\u202E' in text:
+        parts = text.split('\u202E')
+        result = []
+        for part in parts:
+            if '\u202C' in part:
+                sub_parts = part.split('\u202C')
+                result.append(sub_parts[0][::-1])
+                if len(sub_parts) > 1:
+                    result.append(sub_parts[1])
+            else:
+                result.append(part)
+        clean = ''.join(result)
+
+    print(clean)
+    return clean
+
+
+# Использование
+decode_file_simple('text.txt')
+
+ЗАДАНИЕ FUN-04 — Комментарии к шкафу
+ZIP содержит пустые описи. Полезные фрагменты хранятся в per-file comments центрального каталога; общий комментарий объясняет порядок.
+Полезные данные находятся не в содержимом файлов. Проверьте комментарии центрального каталога ZIP.
+//Решение
+Можно открыть через любой менеджеров архивов
+В информации написано 
+Комментарий: Read per-file central-directory comments. Order pieces by their original piece index: 0,1,2...
+Посмотреть комментарии к каждому файлу, в комментариях описан флаг, отсортировать по индексу
+
+ФЛаг RTK{zip_comment_treasure_map}
+
+//Код
+import zipfile
+import re
+
+
+def decode_zip_sorted(filename):
+    """
+    Извлекает, сортирует по piece_index и соединяет фрагменты
+    """
+    fragments = []
+
+    with zipfile.ZipFile(filename, 'r') as zip_ref:
+        for info in zip_ref.infolist():
+            if info.comment:
+                comment = info.comment.decode('utf-8', errors='ignore')
+
+                # Извлекаем piece_index
+                pi_match = re.search(r'piece_index\s*[:=]\s*(\d+)', comment, re.IGNORECASE)
+                piece_index = int(pi_match.group(1)) if pi_match else 9999
+
+                # Извлекаем часть после piece=
+                p_match = re.search(r'piece\s*[:=]\s*([^;]+)', comment, re.IGNORECASE)
+                content = p_match.group(1).strip() if p_match else comment.strip()
+
+                fragments.append((piece_index, content))
+                print(f"  [{piece_index}] {content}")
+
+    # СОРТИРУЕМ
+    fragments.sort(key=lambda x: x[0])
+
+    print("\n" + "=" * 60)
+    print("📊 Отсортированные фрагменты:")
+    for piece_index, content in fragments:
+        print(f"  [{piece_index}] {content}")
+
+    # СОЕДИНЯЕМ
+    flag = ''.join([c[1] for c in fragments])
+    print(f"\n📦 Флаг: {flag}")
+
+    # Ищем RTK{...}
+    match = re.search(r'RTK\{[^}]+\}', flag)
+    if match:
+        print(f"✅ {match.group()}")
+        return match.group()
+
+    return flag
+
+
+# Использование
+decode_zip_sorted('archive.zip')
+
+ЗАДАНИЕ FUN-05 — Скорость ноты
+MIDI содержит шумовой ударный канал и служебную мелодию. Для Note On событий первого канала значение velocity является ASCII-кодом.
+Нужны Note On события MIDI-канала 1. Их velocity интерпретируется как ASCII; ударный канал — шум.
+
+//Решение
+Код
+import mido
+import re
+
+
+def decode_midi_secret(filename):
+    """
+    Извлекает ASCII из velocity Note On событий первого канала
+    """
+    with mido.MidiFile(filename) as mid:
+        ascii_codes = []
+
+        for track in mid.tracks:
+            for msg in track:
+                # Note On, первый канал (0), velocity > 0
+                if msg.type == 'note_on' and msg.channel == 0 and msg.velocity > 0:
+                    ascii_codes.append(msg.velocity)
+
+        # Преобразуем в текст
+        text = ''.join([chr(v) for v in ascii_codes if 32 <= v <= 126])
+        print(f"Извлеченный текст: {text}")
+
+        # Ищем флаг
+        flag = re.search(r'RTK\{[^}]+\}', text)
+        if flag:
+            print(f"Флаг: {flag.group()}")
+            return flag.group()
+
+        return text
+
+
+# Использование
+decode_midi_secret('secret.mid')
