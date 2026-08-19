@@ -1259,3 +1259,103 @@ flag = ''.join(base64.b64decode(e['fragment']).decode() for e in best)
 
 # 4. Ищем RTK{...}
 print(re.search(r'RTK\{[^}]+\}', flag).group())
+
+ЗАДАНИЕ LOGIC-04 — Политика атрибутов
+Вычислите решение ABAC-политики для набора запросов. Только один запрос удовлетворяет всем условиям; его sealed поле содержит base64-флаг
+//Решение
+Можно вручну. пересмотреть все политики
+
+  "policy": {
+    "allow_if": [
+      "subject.clearance >= resource.classification",
+      "subject.department == resource.owner_department",
+      "context.mfa == true",
+      "context.network in ['mgmt','soc']",
+      "not (context.hour < 6 or context.hour >= 22) unless subject.on_call == true"
+    ],
+    "combining": "all conditions must be true"
+
+Сответствует
+      "id": 6,
+      "subject": {
+        "clearance": 4,+
+        "department": "soc",+
+        "on_call": true+
+      },
+      "resource": {
+        "classification": 3,
+        "owner_department": "soc"
+      },
+      "context": {
+        "mfa": true,
+        "network": "mgmt",
+        "hour": 23
+      },
+      "sealed": "UlRLe2FiYWNfcG9saWN5X2V2YWx1YXRlZH0="
+
+Перегнать флаг из Base64 RTK{abac_policy_evaluated}
+
+ЗАДАНИЕ LOGIC-05 — Минимальное покрытие
+Даны индикаторы и наборы доказательств, покрывающие их с разной стоимостью. Найдите единственное минимальное покрытие по правилам файла и соедините фрагменты выбранных наборов.
+
+//Решение 
+Можно решить перебором. отметить куда входят наборы и посчитать сумму
+"universe": [
+    "mail", E1 D1 D5
+    "hash",E1 D2 D5
+    "host", E2 D1 D5
+    "domain", E3 D2
+    "account", E2 D3
+    "archive", E4 D3
+    "egress" E3 D4
+  ],
+E1 1 E2 1 E3 1 E4 1 =  4
+E3 1 D3 2 D5 5 =7
+
+RTK{minimal_cover_incident_set}
+
+//Код
+import json
+from itertools import combinations
+
+
+def solve_set_cover(data):
+    universe = set(data['universe'])
+    sets = data['sets']
+    cost_default = data.get('cost_default', 1)
+
+    # Добавляем cost где нет
+    for s in sets:
+        if 'cost' not in s:
+            s['cost'] = cost_default
+
+    best_solution = None
+    best_cost = float('inf')
+    best_count = float('inf')
+
+    # Перебираем все комбинации
+    for r in range(1, len(sets) + 1):
+        for combo in combinations(sets, r):
+            covered = set()
+            total_cost = 0
+            for s in combo:
+                covered.update(s['covers'])
+                total_cost += s['cost']
+
+            if covered == universe:
+                if total_cost < best_cost or (total_cost == best_cost and len(combo) < best_count):
+                    best_cost = total_cost
+                    best_count = len(combo)
+                    best_solution = combo
+
+    return best_solution, best_cost
+
+
+data = json.load(open('evidence_cover.json'))
+solution, cost = solve_set_cover(data)
+
+# Собираем флаг
+flag = ''.join([s['fragment'] for s in solution])
+print(f"Решение: {[s['id'] for s in solution]}")
+print(f"Стоимость: {cost}")
+print(f"Флаг: {flag}")
