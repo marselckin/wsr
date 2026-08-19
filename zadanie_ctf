@@ -1554,3 +1554,332 @@ let result = Buffer.from(original).toString('utf8');
 console.log(result);
 
 ФЛАГ RTK{js_inverse_pipeline}
+
+ЗАДАНИЕ CRYPTO-01 — Маршрут диспетчера
+В архиве дана квадратная матрица символов и короткая записка о маршруте записи. Восстановите сообщение. Это route cipher: ключевого потока, AES-CTR и RSA здесь нет.
+Матрица записана диспетчером по часовой стрелке от северо-западного угла.
+Символ ~ является заполнителем и не входит в сообщение.
+
+//Решение
+Раскрутить как улитку слева направо
+R T K { r o
+s p a t c u
+i ~ ~ ~ h t
+d ~ ~ ~ } e
+_ ~ ~ ~ ~ _
+r e h p i c
+
+ЗАДАНИЕ CRYPTO-02 — Испорченная доля
+Даны шесть долей секрета Шамира, порог 3 и контрольная SHA-256. Одна доля повреждена. Найдите корректную тройку, восстановите значение полинома в x=0 и декодируйте big-endian UTF-8
+Восстановите полином Лагранжа по любым трём корректным долям.
+SHA-256 позволяет отличить корректный секрет от результата с повреждённой долей.
+
+//РЕШЕНИЕ
+Надо самостоятельно запускать код. ИИ пишет неправильно
+
+import json
+import hashlib
+from itertools import combinations
+
+
+def solve_shamir(filename):
+    with open(filename) as f:
+        data = json.load(f)
+
+    p = int(data['prime'])
+    target = data['secret_sha256']
+    shares = [(s['x'], int(s['y'])) for s in data['shares']]
+
+    for combo in combinations(range(len(shares)), 3):
+        xs = [shares[i][0] for i in combo]
+        ys = [shares[i][1] for i in combo]
+
+        s = 0
+        for i in range(3):
+            n = d = 1
+            for j in range(3):
+                if i != j:
+                    n = (n * (0 - xs[j])) % p
+                    d = (d * (xs[i] - xs[j])) % p
+            s = (s + ys[i] * n * pow(d, -1, p)) % p
+
+        b = s.to_bytes((s.bit_length() + 7) // 8, 'big')
+        if hashlib.sha256(b).hexdigest() == target:
+            print(f"Флаг: {b.decode()}")
+            return b.decode()
+
+
+solve_shamir('shares.json')
+
+ЗАДАНИЕ CRYPTO-03 — Резерв супервозрастающего ключа
+Старый агент использует Merkle–Hellman. Вместе с публичным ключом и шифротекстом утёк аварийный backup параметров r и q. Восстановите приватную супервозрастающую последовательность и расшифруйте байты.
+В аварийный журнал попали r и q. Восстановите супервозрастающую последовательность
+через обратный элемент r по модулю q, затем примените жадное разложение.
+
+//РЕШЕНИЕ
+Я не смог подобрать код на питоне. Много способов перепробовал. ЧатГПТ предложил на джаве
+
+// Merkle–Hellman solver for the given format
+// Run: node mh.js
+
+const data = {
+  public_key: [295, 2, 592, 303, 20, 38, 80, 461],
+  ciphertext: [
+    385, 343, 563, 1458, 1155, 732, 1055, 897,
+    1438, 1055, 1135, 1155, 904, 1438, 1396, 897,
+    1093, 977, 1075, 732, 1135, 977, 1093, 1055,
+    1438, 1075, 732, 1173, 1416
+  ],
+  r: 588,
+  q: 881,
+  bit_order: "MSB first",
+};
+
+function modInv(a, m) {
+  // extended gcd
+  let t = 0, newT = 1;
+  let r = m, newR = ((a % m) + m) % m;
+  while (newR !== 0) {
+    const q = Math.floor(r / newR);
+    [t, newT] = [newT, t - q * newT];
+    [r, newR] = [newR, r - q * newR];
+  }
+  if (r !== 1) throw new Error("No modular inverse");
+  return ((t % m) + m) % m;
+}
+
+function bytesFromBits(bits, bitOrder = "MSB first") {
+  // bits: array of 0/1 length multiple of 8
+  if (bits.length % 8 !== 0) {
+    // truncate to full bytes if needed
+    bits = bits.slice(0, bits.length - (bits.length % 8));
+  }
+  const out = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let byte = 0;
+    if (bitOrder === "MSB first") {
+      for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+    } else {
+      for (let j = 0; j < 8; j++) byte |= (bits[i + j] << j);
+    }
+    out.push(byte);
+  }
+  return Buffer.from(out);
+}
+
+function greedyDecompose(weights, sum) {
+  // weights must be superincreasing for correct greedy
+  // returns bits array aligned with weights order
+  let c = sum;
+  const bits = new Array(weights.length).fill(0);
+  for (let i = weights.length - 1; i >= 0; i--) {
+    if (weights[i] <= c) {
+      bits[i] = 1;
+      c -= weights[i];
+    }
+  }
+  return { bits, remainder: c };
+}
+
+function attempt(orderName) {
+  const { public_key, ciphertext, r, q } = data;
+  const rInv = modInv(r, q);
+
+  // Recover private weights modulo q
+  const A = public_key.map(b => (b * rInv) % q);
+
+  // Build sorted indices for greedy
+  let indices = [...Array(A.length).keys()];
+
+  if (orderName === "desc") {
+    indices.sort((i, j) => A[j] - A[i]); // decreasing by weight
+  } else if (orderName === "asc") {
+    indices.sort((i, j) => A[i] - A[j]); // increasing
+  } else {
+    throw new Error("unknown orderName");
+  }
+
+  // weights in the order we feed greedy
+  const W = indices.map(i => A[i]);
+
+  // For each ciphertext element, recover a bit vector of length n
+  const n = A.length;
+  const allBits = [];
+
+  // greedy will produce bits aligned with W order; map back to original bit positions
+  for (const c of ciphertext) {
+    // classic MH: c' = c * r^{-1} mod q
+    const cPrime = (c * rInv) % q;
+
+    const { bits: bitsW, remainder } = greedyDecompose(W, cPrime);
+
+    // If remainder != 0, greedy failed for this ordering
+    // We still record bits for debugging; you can also break.
+    if (remainder !== 0) {
+      // Uncomment to be strict:
+      // throw new Error(`Greedy failed (remainder=${remainder})`);
+    }
+
+    // Map bits back: bitsW[k] corresponds to indices[k] in original A order.
+    const bitsAorder = new Array(n).fill(0);
+    for (let k = 0; k < n; k++) {
+      bitsAorder[indices[k]] = bitsW[k];
+    }
+
+    // MSB first: interpret bitsAorder as m1..mn where m1 is MSB.
+    // Our ciphertext scheme in MH typically uses m1..mn mapped to A[0..n-1].
+    allBits.push(...bitsAorder);
+  }
+
+  const buf = bytesFromBits(allBits, data.bit_order);
+  return {
+    orderName,
+    privateA: A,
+    decoded: buf.toString("utf8"),
+    decodedHex: buf.toString("hex"),
+    allBits,
+  };
+}
+
+const resDesc = attempt("desc");
+console.log("=== Attempt DESC ===");
+console.log("private A:", resDesc.privateA);
+console.log("decoded (utf8):", JSON.stringify(resDesc.decoded));
+console.log("decoded hex:", resDesc.decodedHex);
+
+const resAsc = attempt("asc");
+console.log("\n=== Attempt ASC ===");
+console.log("private A:", resAsc.privateA);
+console.log("decoded (utf8):", JSON.stringify(resAsc.decoded));
+console.log("decoded hex:", resAsc.decodedHex);
+
+ФЛАГ RTK{knapsack_superincreasing}
+
+ЗАДАНИЕ CRYPTO-04 — Бит роли
+Сервис показывает известный plaintext и токен формата IV || AES-CBC(ciphertext). Измените токен без знания ключа так, чтобы role=guest превратилось в role=admin, и передайте hex в https://ctf.82.202.138.50.sslip.io/arena/crypto/c4/check?token=....
+
+//Решение
+Снова через джава, через питон не получилось
+
+// cbc-bitflip.js
+// Usage: node cbc-bitflip.js
+const tokenHex = "f2344c160501bcd83db2fa51a11eb3974b45d05af66377ff5a2d93c18f381324a42b0cdb316bcf91f169e5a6b5228358";
+const template = "role=guest;uid=1042;scope=read";
+
+const BLOCK = 16;
+const from = Buffer.from("guest", "ascii");
+const to   = Buffer.from("admin", "ascii");
+
+function hexToBuf(h) { return Buffer.from(h, "hex"); }
+function bufToHex(b) { return b.toString("hex"); }
+
+const token = hexToBuf(tokenHex);
+const iv = Buffer.from(token.subarray(0, BLOCK));
+const ct = Buffer.from(token.subarray(BLOCK));
+
+if (ct.length % BLOCK !== 0) throw new Error("Ciphertext length must be multiple of block size");
+
+const nBlocks = ct.length / BLOCK;
+
+// plaintext block indices: P1..Pn correspond to decrypt(C1)..decrypt(Cn)
+// each plaintext byte at global position pos controls ciphertext byte at same pos%BLOCK in block (pos/BLOCK - 1),
+// or in IV when pos/BLOCK == 0.
+const guestOffset = Buffer.from(template, "ascii").indexOf("guest");
+if (guestOffset < 0) throw new Error("Can't find guest in template");
+
+const ctBlocks = [];
+for (let i = 0; i < nBlocks; i++) ctBlocks.push(Buffer.from(ct.subarray(i * BLOCK, (i + 1) * BLOCK)));
+
+// Apply deltas for each char: newP = oldP XOR delta => delta = oldByte XOR newByte
+// Since old bytes are unknown, we use delta = from[k] XOR to[k] because we want to flip
+// the plaintext bytes from 'guest' to 'admin'.
+for (let k = 0; k < from.length; k++) {
+  const pos = guestOffset + k;           // global plaintext byte index
+  const plainBlockIndex0 = Math.floor(pos / BLOCK); // 0 => first plaintext block
+  const idxInBlock = pos % BLOCK;
+
+  const delta = from[k] ^ to[k];
+
+  if (plainBlockIndex0 === 0) {
+    // controlled by IV
+    iv[idxInBlock] ^= delta;
+  } else {
+    // controlled by previous ciphertext block
+    const prevCipherBlock = plainBlockIndex0 - 1; // ciphertext block index in ctBlocks[]
+    ctBlocks[prevCipherBlock][idxInBlock] ^= delta;
+  }
+}
+
+const newToken = Buffer.concat([iv, ...ctBlocks]);
+console.log("NEW TOKEN HEX:", bufToHex(newToken));
+
+Создал файл cbc-bitflip.js и запустил через командную строку
+node cbc-bitflip.js
+
+полученный результат открыл
+https://ctf.82.202.138.50.sslip.io/arena/crypto/c4/check?token=f2344c160507add027a8fa51a11eb3974b45d05af66377ff5a2d93c18f381324a42b0cdb316bcf91f169e5a6b5228358
+
+ЗАДАНИЕ CRYPTO-05 — Неизвестный генератор
+Даны полные последовательные состояния LCG, но неизвестны a, c и m. Восстановите параметры через разности состояний и НОД детерминант, затем предскажите следующее состояние.
+
+//Решение
+Код на питоне
+import math
+
+# Данные состояния LCG
+states = [
+    924777936,
+    213190812,
+    192061973,
+    336606929,
+    491808902,
+    1823286849,
+    1557195423,
+    1157663684
+]
+
+# 1. Вычисляем разности t[n] = x[n+1] - x[n]
+t = [states[i+1] - states[i] for i in range(len(states)-1)]
+print("Разности t:", t)
+
+# 2. Восстанавливаем модуль m
+# Для LCG: t[n+1] ≡ a * t[n] (mod m)
+# Используем: m = gcd(|t[1]^2 - t[0]*t[2]|, |t[2]^2 - t[1]*t[3]|)
+vals = []
+for i in range(len(t)-2):
+    vals.append(abs(t[i+1]**2 - t[i]*t[i+2]))
+
+m = vals[0]
+for v in vals[1:]:
+    m = math.gcd(m, v)
+
+print(f"m = {m}")
+
+# 3. Восстанавливаем a
+# a ≡ (x[2] - x[1]) * (x[1] - x[0])^(-1) mod m
+diff1 = (states[2] - states[1]) % m
+diff0 = (states[1] - states[0]) % m
+a = (diff1 * pow(diff0, -1, m)) % m
+print(f"a = {a}")
+
+# 4. Восстанавливаем c
+# c = x[1] - a * x[0] mod m
+c = (states[1] - a * states[0]) % m
+print(f"c = {c}")
+
+# 5. Проверяем все состояния
+print("\nПроверка:")
+for i in range(len(states)-1):
+    next_state = (a * states[i] + c) % m
+    status = "✅" if next_state == states[i+1] else "❌"
+    print(f"  x[{i}] = {states[i]} -> {next_state} (ожидалось {states[i+1]}) {status}")
+
+# 6. Предсказываем следующее состояние
+x_next = (a * states[-1] + c) % m
+print(f"\nСледующее состояние: x[8] = {x_next}")
+print(f"В hex: {x_next:08x}")
+
+# 7. Формируем флаг
+flag = f"RTK{{next_{x_next:08x}}}"
+print(f"\n✅ Флаг: {flag}")
+Флаг: RTK{next_71f2985a}
