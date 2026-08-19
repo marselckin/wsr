@@ -1359,3 +1359,198 @@ flag = ''.join([s['fragment'] for s in solution])
 print(f"Решение: {[s['id'] for s in solution]}")
 print(f"Стоимость: {cost}")
 print(f"Флаг: {flag}")
+
+ЗАДАНИЕ REV-05 — Разреженная память WASM
+Даны валидный WebAssembly-модуль и Node.js host-loader. Проверяемые байты находятся в разреженных data segments linear memory. Восстановите адресацию и индексную маску.
+
+//Решение
+Тут мне вообще ничего не понятно. Я поставил node.js скопировал module.wasm в корневой каталог и запустил скрипт , который сделал дипсик
+const fs = require("fs");
+
+function extractFlagFromWasm(wasmFile) {
+  const data = fs.readFileSync(wasmFile);
+  
+  // Ищем data segments в WASM
+  // Обычно данные хранятся в секции (5)
+  // Но проще запустить WASM
+  
+  (async () => {
+    const m = await WebAssembly.instantiate(data);
+    const mem = new Uint8Array(m.instance.exports.memory.buffer);
+    
+    let flag = "";
+    for (let i = 0; i < 27; i++) {
+      const addr = 1024 + ((i * 73) % 4096);
+      const byte = mem[addr];
+      const key = ((i * 29 + 0x5d) & 255);
+      const char = byte ^ key;
+      flag += String.fromCharCode(char);
+    }
+    
+    console.log("Флаг:", flag);
+    return flag;
+  })();
+}
+
+extractFlagFromWasm("module.wasm");
+Получил флаг RTK{wasm_linear_memory_map}
+
+ЗАДАНИЕ REV-04 — AST дежурного
+Дан PowerShell health-check. Он собирает ожидаемую строку через массивы и побитовые операции. Проведите статический анализ потока данных; запуск с административными правами не требуется
+Исследуйте порядок массивов и поток байтов PowerShell, не исполняя неизвестный код от администратора.
+
+//Решение
+Сначала расписали чанки [[130, 129], [117, 209, 163, 173, 175, 243], [121, 100, 105, 41, 66, 80], [9, 117, 11, 31, 122, 9], [19, 0, 17, 79, 45, 31]]
+и сделали реверс - обратная перестановка
+chunk 4: [19, 0, 17, 79, 45, 31]
+chunk 3: [9, 117, 11, 31, 122, 9]
+chunk 2: [121, 100, 105, 41, 66, 80]
+chunk 1: [117, 209, 163, 173, 175, 243]
+chunk 0: [130, 129]
+
+исходная строка
+[19, 0, 17, 79, 45, 31, 9, 117, 11, 31, 122, 9, 121, 100, 105, 41, 66, 80, 117, 209, 163, 173, 175, 243, 130, 129]
+
+вычислили ключ (написан в коде powershalд)- $key = [Text.Encoding]::ASCII.GetBytes("AST!")
+key = [65, 83, 84, 33]  # ASCII коды: A=65, S=83, T=84, !=33
+
+//КОД
+flat = [19, 0, 17, 79, 45, 31, 9, 117, 11, 31, 122, 9,
+        121, 100, 105, 41, 66, 80, 117, 209, 163, 173, 175, 243, 130, 129]
+key = [65, 83, 84, 33]  # "AST!"
+
+plain = []
+for i in range(len(flat)):
+    result = flat[i] ^ key[i % 4] ^ ((i * 7) & 255)
+    plain.append(result)
+
+text = ''.join([chr(c) for c in plain])
+print(f"Результат: {text}")
+
+ФЛАГ RTK{powershell_ast_unmask}
+
+ЗАДАНИЕ REV-03 — Микро-VM
+Интерпретатор открыт, но программа проверки хранится в бинарных 4-байтовых инструкциях. Постройте дизассемблер и обратите цепочку операций для каждого байта.
+Интерпретатор открыт, программа бинарная. Дизассемблируйте 4-байтовые инструкции.
+
+//Решение
+Код взят из дипсика
+
+import sys
+
+def rotr(x, n): return ((x >> n) | (x << (8 - n))) & 255
+
+p = open(sys.argv[1], "rb").read() if len(sys.argv) > 1 else open("program.bin", "rb").read()
+
+# Парсим проверки
+checks = []
+for pc in range(0, len(p), 4):
+    op, arg = p[pc], p[pc+1]
+    if op == 0x10:
+        checks.append({'pos': arg})
+    elif op == 0x20:
+        checks[-1]['xor'] = arg
+    elif op == 0x30:
+        checks[-1]['rotl'] = arg
+    elif op == 0x31:
+        checks[-1]['add'] = arg
+    elif op == 0x40:
+        checks[-1]['check'] = arg
+    elif op == 0xff:
+        N = arg
+        break
+
+# Восстанавливаем байты
+flag = []
+for c in checks:
+    temp = ((c['check'] - c['add']) & 255)
+    temp = rotr(temp, c['rotl'])
+    flag.append(chr(temp ^ c['xor']))
+
+print(''.join(flag))
+
+Флаг RTK{tiny_vm_opcode_trace}
+
+ЗАДАНИЕ REV-02 — Байт-код обходчика
+Дан только Python 3.11 .pyc. Определите функцию проверки и восстановите ввод. Полный перебор пространства флага не нужен.
+Python 3.11 bytecode. Определите преобразование и восстановите ввод.
+//Решение
+есть декомпиляторы онлайн 
+https://www.decompiler.com/
+https://www.lddgo.net/en/string/pyc-compile-decompile
+В задании используется Python 3.11 на нем не работает пакет uncompyle6  для декомпиляции
+Декомпиляция проходит только через терминал, файлы с расширением рус нельзя запустить или увидеть в pycharm
+В итоге запустил код
+
+import marshal
+import dis
+
+# Читаем .pyc файл
+with open("checker.pyc", "rb") as f:
+    # Пропускаем заголовок (16 байт для Python 3.11)
+    f.seek(16)
+    code = marshal.load(f)
+
+# Выводим байткод
+dis.dis(code)
+
+# Выводим константы
+print("Константы:", code.co_consts)
+
+# Выводим имена
+print("Имена:", code.co_names)
+
+Вывод вернул дипсик и получил код 
+TARGET = [131, 172, 92, 125, 23, 141, 175, 150, 0, 140,
+          60, 24, 245, 14, 48, 188, 196, 149, 54, 194]
+
+# Находим обратное к 11 по модулю 257
+for i in range(257):
+    if (11 * i) % 257 == 1:
+        INV_11 = i
+        break
+
+print(f"INV_11 = {INV_11}")  # 117
+
+# Восстанавливаем байты
+flag_bytes = []
+for i, target in enumerate(TARGET):
+    code = ((target - i * 19) * INV_11) % 257
+    flag_bytes.append(code)
+
+print("Байты:", flag_bytes)
+print("Hex:", ''.join(f'{b:02x}' for b in flag_bytes))
+
+# Проверяем каждый байт
+for i, b in enumerate(flag_bytes):
+    print(f"{i}: {b} (0x{b:02x}) = '{chr(b) if 32 <= b <= 126 else '?'}'")
+
+Код возвращает ФЛАГ RTK{pyc_grid_walker}
+
+ЗАДАНИЕ REV-01 — Конвейер JavaScript
+Дан Node.js checker с массивом целевых байтов. Восстановите строку, обращая операции в правильном порядке. Патч результата accepted не засчитывается
+Node.js checker. Патч accepted не считается решением: восстановите исходную строку.
+
+//Решение
+Код сделал дипсик. Запускать через node.js
+const target = [121, 86, 112, 96, 137, 119, 116, 70, 51, 57, 61, 57, 55, 67, 57, 65, 113, 108, 95, 95, 111, 93, 104, 98];
+
+// Шаг 1: Обратный reverse()
+let after_reverse = [...target].reverse();
+
+// Шаг 2: Обратный slice/concat
+let len = after_reverse.length;
+let first_part = after_reverse.slice(0, len - 7);  // a[7..]
+let second_part = after_reverse.slice(len - 7);    // a[0..6]
+let a = second_part.concat(first_part);
+
+// Шаг 3: Обратный map
+let original = a.map((v, i) => {
+    return ((v - 17 + 256) % 256) ^ (0x31 + i);
+});
+
+// Преобразуем в строку
+let result = Buffer.from(original).toString('utf8');
+console.log(result);
+
+ФЛАГ RTK{js_inverse_pipeline}
