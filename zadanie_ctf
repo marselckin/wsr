@@ -1035,3 +1035,227 @@ def decode_midi_secret(filename):
 
 # Использование
 decode_midi_secret('secret.mid')
+
+ЗАДАНИЕ LOGIC-01 — Пять смен
+Расставьте пять аналитиков по сменам по четырём ограничениям и прочитайте их фрагменты по времени.
+Смены начинаются в 00:00, 04:00, 08:00, 12:00 и 16:00. Каждый аналитик дежурит один раз.
+
+Аналитики и их фрагменты:
+- Анна: constraints_
+- Борис: shift_
+- Вера: }
+- Дарья: RTK{
+- Егор: solved
+
+Условия:
+1. Вера дежурит последней.
+2. Дарья дежурит непосредственно перед Борисом.
+3. Анна дежурит непосредственно перед Егором.
+4. Пара Дарья—Борис раньше пары Анна—Егор.
+
+Прочитайте фрагменты в порядке смен.
+
+//Решение
+Задание просто - расставить как описано
+
+00 Дарья: RTK{
+04- Борис: shift_
+08- Анна: constraints_
+12- Егор: solved
+16- Вера: }
+
+RTK{shift_constraints_solved}
+
+//Код
+from itertools import permutations
+
+def solve_schedule():
+    """
+    Решает задачу расстановки аналитиков
+    """
+    analysts = {
+        'Анна': 'constraints_',
+        'Борис': 'shift_',
+        'Вера': '}',
+        'Дарья': 'RTK{',
+        'Егор': 'solved'
+    }
+    
+    names = list(analysts.keys())
+    
+    solutions = []
+    
+    for perm in permutations(names):
+        # Вера последняя (смена 5, индекс 4)
+        if perm[4] != 'Вера':
+            continue
+        
+        # Дарья непосредственно перед Борисом
+        if perm.index('Дарья') + 1 != perm.index('Борис'):
+            continue
+        
+        # Анна непосредственно перед Егором
+        if perm.index('Анна') + 1 != perm.index('Егор'):
+            continue
+        
+        # Пара Дарья-Борис раньше пары Анна-Егор
+        if perm.index('Дарья') > perm.index('Анна'):
+            continue
+        
+        solutions.append(perm)
+    
+    return solutions, analysts
+
+def print_schedule(solution, analysts):
+    """
+    Выводит расписание
+    """
+    shifts = [
+        ('1', '00:00-04:00'),
+        ('2', '04:00-08:00'),
+        ('3', '08:00-12:00'),
+        ('4', '12:00-16:00'),
+        ('5', '16:00-20:00')
+    ]
+    
+    print("\n📋 РАСПИСАНИЕ:")
+    print("=" * 50)
+    for i, (num, time) in enumerate(shifts):
+        analyst = solution[i]
+        fragment = analysts[analyst]
+        print(f"Смена {num} ({time}): {analyst:6} → {fragment}")
+    print("=" * 50)
+
+def assemble_flag(solution, analysts):
+    """
+    Собирает флаг из фрагментов в порядке смен
+    """
+    flag = ''.join([analysts[analyst] for analyst in solution])
+    return flag
+
+if __name__ == "__main__":
+    solutions, analysts = solve_schedule()
+    
+    if solutions:
+        print(f"✅ Найдено решений: {len(solutions)}")
+        
+        for i, sol in enumerate(solutions, 1):
+            print(f"\n📌 Решение {i}:")
+            print_schedule(sol, analysts)
+            
+            flag = assemble_flag(sol, analysts)
+            print(f"\n🎯 Флаг: {flag}")
+    else:
+        print("❌ Решений не найдено")
+
+ЗАДАНИЕ LOGIC-02 — Маршрут по активам
+В JSON задан взвешенный граф активов. Найдите единственный кратчайший маршрут от S к T и соедините фрагменты посещённых узлов.
+
+Посчитать стоимость между графами. Выбрать минимальную
+S-A (2)-B(2)-C(1)-T(2)
+RTK{asset_graph_shortest_chain}
+
+//КОД
+
+import json
+import heapq
+import re
+
+
+def find_flag(filename):
+    with open(filename, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # Строим граф из edges
+    graph = {}
+    for node in data['nodes']:
+        graph[node] = {}
+
+    for frm, to, weight in data['edges']:
+        graph[frm][to] = weight
+
+    # Фрагменты
+    fragments = {node: data['nodes'][node]['fragment'] for node in data['nodes']}
+
+    start = data['start']
+    end = data['target']
+
+    # Дейкстра
+    dist = {n: float('inf') for n in graph}
+    dist[start] = 0
+    prev = {n: None for n in graph}
+    pq = [(0, start)]
+
+    while pq:
+        d, n = heapq.heappop(pq)
+        if n == end:
+            break
+        if d > dist[n]:
+            continue
+        for nb, w in graph[n].items():
+            nd = d + w
+            if nd < dist[nb]:
+                dist[nb] = nd
+                prev[nb] = n
+                heapq.heappush(pq, (nd, nb))
+
+    # Восстанавливаем путь
+    path = []
+    n = end
+    while n is not None:
+        path.append(n)
+        n = prev[n]
+    path.reverse()
+
+    # Собираем флаг
+    flag = ''.join([fragments[n] for n in path])
+
+    print(f"Кратчайший путь: {' → '.join(path)}")
+    print(f"Суммарный вес: {dist[end]}")
+    print(f"Флаг: {flag}")
+
+    return flag
+
+
+find_flag('asset_graph.json')
+
+ЗАДАНИЕ LOGIC-03 — Кластер не шума
+CSV содержит десятки одиночных низкоуверенных алертов и один устойчивый кластер. Сгруппируйте события по устойчивым признакам, отсортируйте кластер и декодируйте его фрагменты.
+//Описание
+Ложные одиночные срабатывания имеют confidence <=55. Найдите единственный устойчивый кластер
+по agent_hash + rule + destination, отсортируйте по времени и декодируйте fragment из base6
+
+//Решение
+Можно разделить один столбец на разные - разделитель запятая. Дальше фильтр по столбцу confidence >55. Отсортировать по дате. Декодировать Base64 надо отдельно каждый кусок
+time	agent_hash	rule	destination	confidence	fragment	
+2026-07-12T02:10:00Z	7fd32a91beef	rare-parent	198.51.100.42	99	UlRLew==	RTK{
+2026-07-12T02:11:00Z	7fd32a91beef	rare-parent	198.51.100.42	99	ZmFsc2Vf	false_
+2026-07-12T02:12:00Z	7fd32a91beef	rare-parent	198.51.100.42	99	cG9zaXRpdmVf	positive_
+2026-07-12T02:13:00Z	7fd32a91beef	rare-parent	198.51.100.42	99	Y2x1c3Rlcg==	cluster
+2026-07-12T02:14:00Z	7fd32a91beef	rare-parent	198.51.100.42	99	fQ==	}
+
+Флаг RTK{false_positive_cluster}
+
+//Код
+
+import csv, base64, re
+from collections import Counter
+
+# 1. Читаем, фильтруем confidence > 55
+data = []
+with open('file.csv') as f:
+    for row in csv.DictReader(f):
+        if float(row['confidence']) > 55:
+            data.append(row)
+
+# 2. Группируем по agent_hash+rule+destination, берем самую большую группу
+from itertools import groupby
+key = lambda x: (x['agent_hash'], x['rule'], x['destination'])
+best = max([list(g) for _, g in groupby(sorted(data, key=key), key)], key=len)
+
+# 3. Сортируем по времени и декодируем base64
+best.sort(key=lambda x: x['time'])
+flag = ''.join(base64.b64decode(e['fragment']).decode() for e in best)
+
+# 4. Ищем RTK{...}
+print(re.search(r'RTK\{[^}]+\}', flag).group())
