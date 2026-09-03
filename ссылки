@@ -6,7 +6,9 @@ python -m pip install pycryptodome
 
 ссылки
 https://hackerlab.pro/blog/forenzika-ctf-dlya-nachinayuschih-analiz-dampov-pamyati-s-volatility-i-vosstanovlenie-fayl
-
+https://habr.com/ru/companies/lanit/articles/690434/
+https://habr.com/ru/companies/bastion/articles/651869/
+https://sky.pro/wiki/money/volatility-poshagovoe-rukovodstvo-po-ispolzovaniyu-dlya-novichkov/
 считать хэш
 powershell -Command "Get-FileHash memory.raw -Algorithm SHA256"
 
