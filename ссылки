@@ -1,3 +1,5 @@
 Volatility 3
 https://github.com/volatilityfoundation/volatility3
 python -m pip install yara-x
+pip install pefile
+python -m pip install pycryptodome
