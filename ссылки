@@ -1,0 +1,3 @@
+Volatility 3
+https://github.com/volatilityfoundation/volatility3
+python -m pip install yara-x
