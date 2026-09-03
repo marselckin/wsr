@@ -3,3 +3,31 @@ https://github.com/volatilityfoundation/volatility3
 python -m pip install yara-x
 pip install pefile
 python -m pip install pycryptodome
+
+ссылки
+https://hackerlab.pro/blog/forenzika-ctf-dlya-nachinayuschih-analiz-dampov-pamyati-s-volatility-i-vosstanovlenie-fayl
+
+считать хэш
+powershell -Command "Get-FileHash memory.raw -Algorithm SHA256"
+
+. Информация о системе:
+bash
+python vol.py -f memory.raw windows.info
+2. Список процессов:
+bash
+python vol.py -f memory.raw windows.pslist
+3. Дерево процессов:
+bash
+python vol.py -f memory.raw windows.pstree
+4. Сканирование процессов (включая скрытые):
+bash
+python vol.py -f memory.raw windows.psscan
+5. Командная строка процессов:
+bash
+python vol.py -f memory.raw windows.cmdline
+6. Сетевые соединения:
+bash
+python vol.py -f memory.raw windows.netscan
+7. Дамп паролей (хэшей):
+bash
+python vol.py -f memory.raw windows.hashdump
