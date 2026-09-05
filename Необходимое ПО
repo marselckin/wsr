@@ -1,2 +1,10 @@
 Burp Suite - анализ работы сайтов
 Wireshark - анализ трафика
+Zap - сканер уязвимостей web
+nmap - сканер
+
+установка python
+python3 --version
+su -
+apt-get update && apt-get install python3
+exit
