@@ -8,3 +8,5 @@ python3 --version
 su -
 apt-get update && apt-get install python3
 exit
+
+volatility - анализ дамп
